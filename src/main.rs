@@ -1,5 +1,6 @@
 use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
 use std::{
+    cmp::Ordering,
     convert::{Into, TryFrom},
     ops::{Add, Sub},
     str::FromStr,
@@ -13,7 +14,7 @@ macro_rules! md {
 
 const LENGTHS: [i16; 4] = [1000, 60, 60, 24];
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 struct TimeStamp([i16; 4]);
 
 impl TimeStamp {
@@ -30,13 +31,38 @@ impl TimeStamp {
     }
 }
 
+impl PartialOrd for TimeStamp {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TimeStamp {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // a timestamp is bigger if the distance
+        for i in 0..4 {
+            // starting from the biggest time unit (hr.) then moving backwards towards the
+            // millisecond range.
+            let ridx = 3 - i;
+            if self.0[ridx] < other.0[ridx] {
+                return Ordering::Less;
+            }
+
+            if self.0[ridx] > other.0[ridx] {
+                return Ordering::Greater;
+            }
+        }
+
+        Ordering::Equal
+    }
+}
+
 impl TryFrom<Box<[i16]>> for TimeStamp {
     type Error = Box<[i16]>;
 
     fn try_from(v: Box<[i16]>) -> Result<Self, Self::Error> {
         // check that the box is big enough.
         let big_enough_box = <Box<[_; 4]>>::try_from(v)?;
-        println!("{:?}", big_enough_box);
         Ok(TimeStamp::new(*big_enough_box))
     }
 }
@@ -152,10 +178,14 @@ fn run(matches: &ArgMatches) -> Option<TimeStamp> {
             if sub_m.is_present("quick") {
                 let end = build_raw_timestamp(sub_m)?;
                 let end = TimeStamp::from_str(&end).ok()?;
-                Some(end - start)
+                let max = std::cmp::max(end.clone(), start.clone());
+                let min = std::cmp::min(end, start);
+                Some(max - min)
             } else {
                 let end = TimeStamp::from_str(sub_m.value_of("formatted").unwrap()).ok()?;
-                Some(end - start)
+                let max = std::cmp::max(end.clone(), start.clone());
+                let min = std::cmp::min(end, start);
+                Some(max - min)
             }
         }
         _ => unreachable!(),
@@ -226,8 +256,61 @@ mod test {
     use super::*;
 
     #[test]
-    fn parse_raw_compliant() {
+    fn modulus_operator() {
+        assert_eq!(3, md!(-57, 60));
+        assert_eq!(0, md!(0, 1));
+    }
+
+    #[test]
+    fn parsing_should_fail() {
+        assert!(TimeStamp::from_str("").is_err());
+        assert!(TimeStamp::from_str("-123").is_err());
+        assert!(TimeStamp::from_str("03:20:10.400").is_err());
+        assert!(TimeStamp::from_str("03:20:10,400,200").is_err());
+    }
+
+    #[test]
+    fn parser_differentials() {
+        // basically any combination of ':' and ',' will work
+        // as long as there is exactly 4 of them.
+        assert!(TimeStamp::from_str("01:01:01:000").is_ok());
+        assert!(TimeStamp::from_str("01,01,01,000").is_ok());
+        assert!(TimeStamp::from_str("01:01,01:000").is_ok());
+    }
+
+    #[test]
+    fn parse_from_str() {
         let result = TimeStamp::from_str("00:01:02,400").unwrap();
-        assert_eq!(result.0, TimeStamp([400, 2, 1, 0]).0);
+        assert_eq!(result, TimeStamp([400, 2, 1, 0]));
+    }
+
+    #[test]
+    fn parse_from_box() {
+        let from: Box<[i16]> = Box::new([200, 3, 4, 1]);
+        assert!(TimeStamp::try_from(from).is_ok());
+    }
+
+    #[test]
+    fn equality() {
+        let a = TimeStamp::from_str("01:01:01,000");
+        let b = TimeStamp::from_str("01:01:01,000");
+        assert_eq!(a, b);
+
+        let a = TimeStamp::from_str("01:02:01,000");
+        let b = TimeStamp::from_str("01:01:61,000");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn ordering() {
+        let a = TimeStamp::from_str("00:01:02,001");
+        let b = TimeStamp::from_str("00:01:02,000");
+        assert!(a > b && b < a);
+    }
+
+    #[test]
+    fn into_string() {
+        let r = TimeStamp::from_str("03:20:10,400").unwrap();
+        assert_eq!(Into::<String>::into(r), String::from("03:20:10,400"))
     }
 }
