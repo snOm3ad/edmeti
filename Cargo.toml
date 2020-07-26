@@ -3,6 +3,9 @@ name = "edmeti"
 version = "0.2.0"
 authors = ["snOm3ad <geronimooliver00@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "A timestamp editor cli tool."
+repository = "https://github.com/snOm3ad/edmeti"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
